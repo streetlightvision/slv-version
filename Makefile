@@ -4,7 +4,7 @@
 	touch .state/build
 
 .state/tests: requirements-test.txt
-	pip install -q -r requirements-test.txt
+	pip install -q --upgrade -r requirements-test.txt
 	mkdir -p .state
 	touch .state/tests
 
