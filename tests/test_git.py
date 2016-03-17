@@ -18,6 +18,7 @@ def test_nonrepo(nonrepo):
         response = audit_git(nonrepo.repository_dir)
 
 
+@pytest.mark.xfail(reason="works with recent git")
 def test_dirty(dirty):
     response = audit_git(dirty.repository_dir)
     assert response.dirty is True
