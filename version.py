@@ -45,6 +45,52 @@ class Repository:
         return '<%s(%s)>' % (self.__class__.__name__, ', '.join(sorted(attrs)))
 
 
+class Version(object):
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            other = str(other)
+        if isinstance(other, str):
+            return str(self) == other
+        raise ValueError('Not comparable')
+
+
+class RPMVersion(Version):
+
+    def __init__(self, release, build=None):
+        self.release = release
+        self.build = build
+
+    def __str__(self):
+        if self.build:
+            return '%s-%s' % (self.release, self.build)
+        return '%s' % self.release
+
+    def __repr__(self):
+        return '<RPMVersion(%r, build=%r)>' % (self.release, self.build)
+
+
+class MavenVersion(Version):
+
+    def __init__(self, release, qualifiers=None, snapshot=None):
+        self.release = release
+        self.qualifiers = qualifiers or []
+        self.snapshot = snapshot
+
+    def __str__(self):
+        parts = []
+        parts.append('%s' % self.release)
+        for q in self.qualifiers:
+            parts.append('%s' % q)
+
+        if self.snapshot:
+            parts.append('SNAPSHOT')
+        return ('-'.join(p for p in parts)).upper()
+
+    def __repr__(self):
+        return '<MavenVersion(%r, build=%r)>' % (self.release, self.build)
+
+
 def shell(*args, **kwargs):
     if isinstance(args[0], str):
         kwargs.setdefault('shell', True)
@@ -126,6 +172,7 @@ def parse_version(version):
         return version
     raise ValueError('Bad version %r' % version)
 
+
 def increment_release(version):
     if isinstance(version, SetuptoolsVersion):
         release = version._version.release
@@ -138,16 +185,16 @@ def increment_release(version):
 
 def version_rpm(closest_tag, build, distribution=None):
     version = parse_version(closest_tag or '0.0.0')
-    parts = []
+    release, parts = '', []
 
     # Release segment
-    parts.append(".".join(str(x) for x in version._version.release))
+    release = ".".join(str(x) for x in version._version.release)
 
     # build parts
     if version._version.pre is not None:
-        parts.append("-0.{0}.".format(build))
+        parts.append("0.{0}.".format(build))
     else:
-        parts.append("-{0}".format(build))
+        parts.append("{0}".format(build))
 
     # Pre-release
     if version._version.pre is not None:
@@ -163,22 +210,21 @@ def version_rpm(closest_tag, build, distribution=None):
 
     if distribution:
         parts.append(".{0}".format(distribution))
-
-    return "".join(parts)
+    return RPMVersion(release, "".join(parts))
 
 
 def version_maven(closest_tag, branch, distance):
     if branch != 'master':
-        return '0-%s-SNAPSHOT' % branch.replace('-', '').upper()
+        return MavenVersion('0', [branch.replace('-', '')], snapshot=True)
 
     version = parse_version(closest_tag or '0.0.0')
-    parts = []
+    release, parts, snapshot = '', [], False
 
     # Release segment
     if distance:
-        parts.append(increment_release(version))
+        release = increment_release(version)
     else:
-        parts.append(".".join(str(x) for x in version._version.release))
+        release = ".".join(str(x) for x in version._version.release)
 
     # Pre-release
     if version._version.pre is not None:
@@ -192,35 +238,80 @@ def version_maven(closest_tag, branch, distance):
     if version._version.dev is not None:
         parts.append("dev{0}".format(version._version.dev[1]))
 
-    if distance:
-        parts.append("SNAPSHOT")
-    return ('-'.join(parts)).upper()
+    snapshot = True if distance else False
+    return MavenVersion(release, parts, snapshot=snapshot)
+
+
+def prepare_arg(value):
+    return '' if value is None else str(value)
+
+
+def format_default(version, arguments):
+    return str(version)
+
+
+def format_rpm_args(version, arguments):
+    response = [
+        '%s=%s' % (arguments.arg_release.upper(), prepare_arg(version.release)),
+        '%s=%s' % (arguments.arg_build.upper(), prepare_arg(version.build))
+    ]
+    return '\n'.join(response)
+
+
+def format_git_args(version, arguments):
+    response = []
+    for key, value in version.__dict__.items():
+        response.append('GIT_%s=%s' % (key.upper(), prepare_arg(value)))
+    return '\n'.join(sorted(response))
+
+
+def format_git_json(repository, arguments):
+    return json.dumps(repository.__dict__, indent=arguments.indent)
+
+
+def convert_rpm(repository, arguments):
+    return version_rpm(repository.closest_tag,
+                       arguments.build,
+                       arguments.distribution)
+
+
+def convert_maven(repository, arguments):
+    return version_maven(repository.closest_tag,
+                         repository.branch,
+                         repository.distance)
+
+
+def convert_repo(repository, arguments):
+    return repository
 
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
+    parser.set_defaults(format=format_default)
     parser.add_argument('--directory')
     subparsers = parser.add_subparsers(help='sub-command help')
 
     parser_a = subparsers.add_parser('rpm', help='rpm version')
-    parser_a.set_defaults(format=lambda r, a: version_rpm(r.closest_tag,
-                                                          a.build,
-                                                          a.distribution),
-                          type='rpm')
-    parser_a.add_argument('--build', default='${BUILD_NUMBER}')
-    parser_a.add_argument('--distribution')
+    parser_a.set_defaults(parser=convert_rpm, type='rpm')
+    parser_a.add_argument('--build', default='${BUILD_NUMBER}',
+                          help='set build placeholder. default %(default)s')
+    parser_a.add_argument('--distribution',
+                          help='set distribution')
+    parser_a.add_argument('--render-args', dest='format',
+                          action='store_const', const=format_rpm_args,
+                          default=format_default)
+    parser_a.add_argument('--arg-release', default='RPM_RELEASE')
+    parser_a.add_argument('--arg-build', default='RPM_BUILD')
 
     parser_b = subparsers.add_parser('maven', help='maven version')
-    parser_b.set_defaults(format=lambda r, a: version_maven(r.closest_tag,
-                                                            r.branch,
-                                                            r.distance),
-                          type='maven')
+    parser_b.set_defaults(parser=convert_maven, type='maven')
 
     parser_c = subparsers.add_parser('git', help='git attributes')
-    parser_c.set_defaults(format=lambda r, a: json.dumps(r.__dict__,
-                                                         indent=a.indent),
-                          type='git')
-    parser_c.add_argument('--indent', type=int, default=2)
+    parser_c.set_defaults(parser=convert_repo, type='git')
+    parser_c.add_argument('--json-indent', dest='indent', type=int, default=2)
+    parser_c.add_argument('--render-args', dest='format',
+                          action='store_const', const=format_git_args,
+                          default=format_git_json)
 
     args = parser.parse_args(args)
     return args, parser
@@ -230,8 +321,9 @@ def main(args=None):
     args, parser = parse_args(args)
     try:
         repository = audit_git(args.directory)
-        response = args.format(repository, args)
-        print(response)
+        response = args.parser(repository, args)
+        response = args.format(response, args)
+        print('%s' % response)
     except Exception as error:
         parser.error(error)
 

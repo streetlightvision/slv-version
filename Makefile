@@ -1,4 +1,4 @@
-.state/build: setup.cfg setup.py version.py
+.state/build: setup.cfg setup.py
 	pip install -q -e .
 	mkdir -p .state
 	touch .state/build

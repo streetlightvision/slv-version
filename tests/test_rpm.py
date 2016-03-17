@@ -1,5 +1,5 @@
 import pytest
-from version import version_rpm
+from version import version_rpm, RPMVersion
 
 @pytest.mark.parametrize("args, expected", [
     ((None, 42, 'el14'), '0.0.0-42.el14'),
@@ -13,3 +13,12 @@ from version import version_rpm
 ])
 def test_rpm(args, expected):
     assert version_rpm(*args) == expected
+
+
+@pytest.mark.parametrize("version, expected", [
+    (RPMVersion('1.2.3'), RPMVersion('1.2.3')),
+    (RPMVersion('1.2.3'), '1.2.3'),
+    ('1.2.3', RPMVersion('1.2.3')),
+])
+def test_version(version, expected):
+    assert version == expected

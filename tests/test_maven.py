@@ -1,5 +1,5 @@
 import pytest
-from version import version_maven
+from version import version_maven, MavenVersion
 
 
 @pytest.mark.parametrize("args, expected", [
@@ -16,3 +16,12 @@ from version import version_maven
 ])
 def test_maven(args, expected):
     assert version_maven(*args) == expected
+
+
+@pytest.mark.parametrize("version, expected", [
+    (MavenVersion('1.2.3'), MavenVersion('1.2.3')),
+    (MavenVersion('1.2.3'), '1.2.3'),
+    ('1.2.3', MavenVersion('1.2.3')),
+])
+def test_compare(version, expected):
+    assert version == expected
